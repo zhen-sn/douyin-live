@@ -1,0 +1,17 @@
+# 运行时数据：SQLite 库里存着 SMTP 授权码，cookies/ 存着抖音登录态，都不要提交
+data/
+
+# 日志与临时文件
+*.log
+scratch/
+
+# 本地配置
+*.local.php
+.env
+
+# 编辑器 / 系统
+.idea/
+.vscode/
+Thumbs.db
+Desktop.ini
+.DS_Store
