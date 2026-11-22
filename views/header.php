@@ -36,6 +36,12 @@ declare(strict_types=1);
                 <i></i>后台监控<?= $stats['monitor_alive'] ? '运行中' : '未运行' ?>
             </span>
             <span class="top-live" data-top-live><i></i><b><?= (int)$stats['live'] ?></b> 个直播中</span>
+            <?php if ($stats['queue']['pending'] > 0 || $stats['queue']['failed'] > 0): ?>
+                <a class="queue-badge <?= $stats['queue']['failed'] > 0 ? 'is-bad' : '' ?>"
+                   href="index.php?page=history">
+                    通知待发 <?= (int)$stats['queue']['pending'] ?><?= $stats['queue']['failed'] > 0 ? ' · 放弃 ' . (int)$stats['queue']['failed'] : '' ?>
+                </a>
+            <?php endif; ?>
         </div>
     </header>
 

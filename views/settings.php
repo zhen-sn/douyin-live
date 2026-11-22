@@ -37,6 +37,28 @@ declare(strict_types=1);
                        value="<?= h((string)$settings['request_timeout']) ?>">
             </label>
         </div>
+        <div class="field-row">
+            <label class="field">
+                <span>下播复核轮数（0=立刻判定）</span>
+                <input type="number" name="offline_confirm_rounds" min="0" max="5" step="1"
+                       value="<?= h((string)$settings['offline_confirm_rounds']) ?>">
+            </label>
+            <label class="field">
+                <span>久未开播阈值（天）</span>
+                <input type="number" name="idle_after_days" min="0" max="365" step="1"
+                       value="<?= h((string)$settings['idle_after_days']) ?>">
+            </label>
+            <label class="field">
+                <span>降频后间隔（秒）</span>
+                <input type="number" name="idle_interval" min="60" max="86400" step="60"
+                       value="<?= h((string)$settings['idle_interval']) ?>">
+            </label>
+        </div>
+        <p class="hint">
+            复核轮数用于抗抖动：连续 N 轮看不到直播才判定下播，下播提醒会相应晚 N−1 个周期。
+            连续 <?= (int)$settings['idle_after_days'] ?> 天没开播的主播自动降到
+            <?= (int)$settings['idle_interval'] ?> 秒一次，开播后立刻恢复常规间隔；填 0 关闭降频。
+        </p>
 
         <h2>抖音访问</h2>
         <label class="field">
@@ -58,6 +80,26 @@ declare(strict_types=1);
             <input type="checkbox" name="notify_on_offline" value="1" <?= $settings['notify_on_offline'] === '1' ? 'checked' : '' ?>>
             <span>下播时推送</span>
         </label>
+        <label class="checkbox">
+            <input type="checkbox" name="notify_on_title" value="1" <?= $settings['notify_on_title'] === '1' ? 'checked' : '' ?>>
+            <span>直播中改标题时推送</span>
+        </label>
+        <div class="field-row">
+            <label class="field">
+                <span>推送失败最大重试次数</span>
+                <input type="number" name="notify_retry_max" min="1" max="10" step="1"
+                       value="<?= h((string)$settings['notify_retry_max']) ?>">
+            </label>
+            <label class="field">
+                <span>重试首次退避（秒）</span>
+                <input type="number" name="notify_retry_backoff" min="15" max="3600" step="15"
+                       value="<?= h((string)$settings['notify_retry_backoff']) ?>">
+            </label>
+        </div>
+        <p class="hint">
+            每次开播/下播都会按渠道写入发送队列并立即尝试；失败的行按 <?= (int)$settings['notify_retry_backoff'] ?> 秒起指数退避自动重试，
+            超过 <?= (int)$settings['notify_retry_max'] ?> 次标记为放弃，可在「开播记录」页查看与手动补发。
+        </p>
         <div class="field-row">
             <label class="field field-grow">
                 <span>Server酱 SendKey</span>

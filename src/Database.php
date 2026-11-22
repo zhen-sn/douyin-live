@@ -69,10 +69,48 @@ CREATE TABLE IF NOT EXISTS settings (
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS notify_queue (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    streamer_id INTEGER,
+    event TEXT NOT NULL,
+    channel TEXT NOT NULL,
+    title TEXT NOT NULL,
+    body TEXT NOT NULL,
+    url TEXT,
+    context TEXT,
+    attempts INTEGER NOT NULL DEFAULT 0,
+    status TEXT NOT NULL DEFAULT 'pending',
+    last_error TEXT,
+    next_retry_at TEXT,
+    created_at TEXT NOT NULL,
+    sent_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_notify_queue_due ON notify_queue(status, next_retry_at, id);
 SQL);
+        self::migrate($pdo);
         $stmt = $pdo->prepare('INSERT OR IGNORE INTO settings(key, value) VALUES(?, ?)');
         foreach (self::defaults() as $key => $value) {
             $stmt->execute([$key, $value]);
+        }
+    }
+
+    /**
+     * 老库补列：只在缺列时 ALTER，避免每次启动都写 schema。
+     */
+    private static function migrate(PDO $pdo): void
+    {
+        $columns = [];
+        foreach ($pdo->query('PRAGMA table_info(streamers)') as $row) {
+            $columns[$row['name']] = true;
+        }
+        $add = [
+            'next_check_at' => 'TEXT',
+            'pending_offline' => 'INTEGER NOT NULL DEFAULT 0',
+        ];
+        foreach ($add as $name => $type) {
+            if (!isset($columns[$name])) {
+                $pdo->exec('ALTER TABLE streamers ADD COLUMN ' . $name . ' ' . $type);
+            }
         }
     }
 
@@ -87,6 +125,12 @@ SQL);
             'douyin_cookie' => '',
             'notify_on_online' => '1',
             'notify_on_offline' => '1',
+            'notify_on_title' => '0',
+            'notify_retry_max' => '3',
+            'notify_retry_backoff' => '120',
+            'offline_confirm_rounds' => '1',
+            'idle_after_days' => '3',
+            'idle_interval' => '600',
             'notify_serverchan_key' => '',
             'notify_bark_url' => '',
             'notify_webhook' => '',

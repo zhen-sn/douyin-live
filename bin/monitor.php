@@ -17,6 +17,7 @@ function monitorLog(string $message): void
 $argv = $_SERVER['argv'] ?? [];
 $once = in_array('--once', $argv, true);
 $quiet = in_array('--quiet', $argv, true);
+$forceAll = in_array('--all', $argv, true);
 $onlyId = 0;
 foreach ($argv as $arg) {
     if (str_starts_with($arg, '--id=')) {
@@ -57,14 +58,23 @@ while (true) {
         $progress = $quiet ? null : static function (string $message) use ($log): void {
             $log('  ' . $message);
         };
-        $summary = $service->checkAll(true, $progress);
+        $summary = $service->checkAll(true, $progress, $forceAll);
         $log(sprintf(
-            '本轮完成：共 %d 位，直播中 %d，未开播 %d，异常 %d',
+            '本轮完成：检测 %d 位，直播中 %d，未开播 %d，异常 %d，未到时间跳过 %d',
             $summary['checked'],
             $summary['live'],
             $summary['offline'],
-            $summary['errors']
+            $summary['errors'],
+            $summary['skipped']
         ));
+        if ($summary['retry']['checked'] > 0) {
+            $log(sprintf(
+                '通知重试：处理 %d 条，补发成功 %d，放弃 %d',
+                $summary['retry']['checked'],
+                $summary['retry']['sent'],
+                $summary['retry']['failed']
+            ));
+        }
         if ($summary['errors'] > 0) {
             $exitCode = 1;
         }
@@ -76,8 +86,16 @@ while (true) {
         break;
     }
     $interval = max(10, (int)($settings['check_interval'] ?? 60));
-    $log('等待 ' . $interval . ' 秒');
-    $deadline = time() + $interval;
+    // 下一次唤醒：轮询间隔与最近一个到期时间取较早者，避免空转
+    $nextDue = Database::pdo()
+        ->query('SELECT MIN(next_check_at) FROM streamers WHERE enabled = 1 AND next_check_at IS NOT NULL')
+        ->fetchColumn();
+    $wait = $interval;
+    if (is_string($nextDue) && $nextDue !== '') {
+        $wait = min($interval, max(5, strtotime($nextDue) - time()));
+    }
+    $log('等待 ' . $wait . ' 秒');
+    $deadline = time() + $wait;
     while (time() < $deadline) {
         sleep(min(3, max(1, $deadline - time())));
     }

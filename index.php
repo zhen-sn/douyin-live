@@ -99,7 +99,7 @@ if ($action !== '') {
 
             case 'check_all':
                 set_time_limit(1800);
-                $summary = $service->checkAll(true);
+                $summary = $service->checkAll(true, null, true);
                 flash(sprintf(
                     '批量检测完成：共 %d 位，直播中 %d，未开播 %d，异常 %d',
                     $summary['checked'],
@@ -148,12 +148,23 @@ if ($action !== '') {
                     'smtp_from' => $smtpFrom,
                     'smtp_from_name' => utf8Input((string)($_POST['smtp_from_name'] ?? '')),
                     'smtp_to' => implode(', ', $smtpTo),
+                    'notify_on_title' => isset($_POST['notify_on_title']) ? '1' : '0',
+                    'offline_confirm_rounds' => (string)$clamp((int)($_POST['offline_confirm_rounds'] ?? 1), 0, 5),
+                    'notify_retry_max' => (string)$clamp((int)($_POST['notify_retry_max'] ?? 3), 1, 10),
+                    'notify_retry_backoff' => (string)$clamp((int)($_POST['notify_retry_backoff'] ?? 120), 15, 3600),
+                    'idle_after_days' => (string)$clamp((int)($_POST['idle_after_days'] ?? 3), 0, 365),
+                    'idle_interval' => (string)$clamp((int)($_POST['idle_interval'] ?? 600), 60, 86400),
                 ];
                 $smtpPass = (string)($_POST['smtp_pass'] ?? '');
                 if ($smtpPass !== '') {
                     $pairs['smtp_pass'] = $smtpPass;
                 }
+                $intervalChanged = $pairs['check_interval'] !== $settings['check_interval'];
                 Database::setSettings($pairs);
+                if ($intervalChanged) {
+                    // 改了间隔就让全部主播立刻到期，下一轮按新规则重排（含降频与退避）
+                    $pdo->exec('UPDATE streamers SET next_check_at = NULL WHERE fail_count = 0');
+                }
                 flash('设置已保存');
                 redirectTo('index.php?page=settings');
 
@@ -189,6 +200,23 @@ if ($action !== '') {
             case 'clear_events':
                 $pdo->exec('DELETE FROM events');
                 flash('历史记录已清空');
+                redirectTo('index.php?page=history');
+
+            case 'retry_queue':
+                $stat = (new Notifier($settings))->retryPending(50, true);
+                flash(
+                    $stat['checked'] === 0
+                        ? '没有待重试的通知'
+                        : sprintf('重试 %d 条通知：成功 %d，仍失败 %d', $stat['checked'], $stat['sent'], $stat['failed']),
+                    $stat['checked'] === 0
+                        ? 'info'
+                        : ($stat['sent'] === 0 ? 'error' : 'success')
+                );
+                redirectTo('index.php?page=history');
+
+            case 'clear_queue':
+                $deleted = Notifier::clearQueue((string)($_POST['queue_status'] ?? 'failed'));
+                flash("已清理 {$deleted} 条通知记录");
                 redirectTo('index.php?page=history');
 
             default:
@@ -230,12 +258,16 @@ $heartbeat = (string)($settings['monitor_heartbeat'] ?? '');
 $heartbeatAge = $heartbeat !== '' ? time() - (int)strtotime($heartbeat) : null;
 $monitorAlive = $heartbeatAge !== null
     && $heartbeatAge <= max(180, ((int)($settings['check_interval'] ?? 60)) * 3);
+$queue = Notifier::queueStats();
 $stats = [
     'total' => $totalStreamers,
     'live' => $liveCount,
     'today_events' => $todayEvents,
     'heartbeat' => $heartbeat,
     'monitor_alive' => $monitorAlive,
+    'queue' => $queue,
+    'gap_at' => (string)($settings['monitor_gap_at'] ?? ''),
+    'gap_minutes' => (int)($settings['monitor_gap_minutes'] ?? 0),
 ];
 
 if ($page === 'home') {
@@ -270,6 +302,12 @@ if ($page === 'home') {
          JOIN streamers s ON s.id = e.streamer_id
          ORDER BY e.id DESC LIMIT 300'
     )->fetchAll();
+    $queueRows = $pdo->query(
+        'SELECT q.*, s.name FROM notify_queue q
+         LEFT JOIN streamers s ON s.id = q.streamer_id
+         WHERE q.status <> \'sent\'
+         ORDER BY CASE q.status WHEN \'pending\' THEN 0 ELSE 1 END, q.id DESC LIMIT 100'
+    )->fetchAll();
 } elseif ($page === 'settings') {
     $checks = [
         ['PHP 版本', PHP_VERSION, version_compare(PHP_VERSION, '8.0.0', '>=')],
@@ -288,6 +326,18 @@ if ($page === 'home') {
                 ? '正常'
                 : '因系统证书链已自动降级（' . $settings['ssl_fallback_at'] . '）',
             ($settings['ssl_fallback_at'] ?? '') === '',
+        ],
+        [
+            '监控连续性',
+            ($settings['monitor_gap_at'] ?? '') === ''
+                ? '无停摆记录'
+                : sprintf('最近一次停摆 %s 分钟（%s 起）', $settings['monitor_gap_minutes'], $settings['monitor_gap_at']),
+            ($settings['monitor_gap_at'] ?? '') === '',
+        ],
+        [
+            '通知队列',
+            sprintf('待发 %d，放弃 %d，已送达 %d', $queue['pending'], $queue['failed'], $queue['sent']),
+            $queue['failed'] === 0,
         ],
     ];
 }
